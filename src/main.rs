@@ -30,9 +30,9 @@ impl DummyObject {
         ptr as *mut DummyObject
     }
 
-    fn reference_to(&mut self, mut dummy: DummyObject) {
+    fn reference_to(&mut self, dummy: *mut DummyObject) {
         if self.next.is_null() {
-            self.next = &mut dummy;
+            self.next = dummy;
         } else {
             // Find the end of the list
             let mut ptr = self.next;
@@ -44,7 +44,7 @@ impl DummyObject {
             }
 
             unsafe {
-                (*ptr).next = &mut dummy;
+                (*ptr).next = dummy;
             }
         }
     }
@@ -53,21 +53,21 @@ impl DummyObject {
 /// This is a memory arena that keeps track of the references to roots of `DummyObject`
 #[derive(Debug, Default)]
 struct MarkandSweepGC {
-    objects: Vec<DummyObject>,
+    objects: Vec<*mut DummyObject>,
 }
 
 impl MarkandSweepGC {
     fn new_spawn_test_dummies(amount: usize) -> Self {
         let mut objects = Vec::with_capacity(amount);
         for _ in 0..amount {
-            let dummy_obj = DummyObject::new();
+            let dummy_obj = DummyObject::new_on_heap();
             objects.push(dummy_obj);
         }
 
         Self { objects }
     }
 
-    fn refernce_dummy_at_to(&mut self, at: usize, dummy: DummyObject) {
+    fn refernce_dummy_at_to(&mut self, at: usize, dummy: *mut DummyObject) {
         let root = self.objects.get_mut(at);
 
         assert!(
@@ -75,7 +75,9 @@ impl MarkandSweepGC {
             "No root dummy object was not found at index"
         );
 
-        root.unwrap().reference_to(dummy);
+        unsafe {
+            (**root.unwrap()).reference_to(dummy);
+        }
     }
 
     fn display_root_trail_addresses(&self, at: usize) {
@@ -87,16 +89,22 @@ impl MarkandSweepGC {
 
         let root = root.unwrap();
 
-        print!("Root {at} path ({:#p}): ", root);
-        let mut ptr_head = root.next;
+        if root.is_null() {
+            let msg = "[ALERT]: Root `DummyObject` was null at index {at}, so nothing to print!";
+            println!("{msg}");
+            return;
+        }
+
         unsafe {
+            print!("Root {at} path ({:#p}): ", *root);
+            let mut ptr_head = (**root).next;
             while !(*ptr_head).next.is_null() {
-                print!("{:#p} -> ", &*ptr_head);
+                print!("{:#p} -> ", ptr_head);
                 ptr_head = (*ptr_head).next;
             }
 
             if (*ptr_head).next.is_null() {
-                print!("{:#p} -> ", &*ptr_head);
+                print!("{:#p} -> ", ptr_head);
                 println!("NULL");
             }
         }
@@ -111,9 +119,15 @@ impl MarkandSweepGC {
 
         let root = root.unwrap();
 
-        print!("Root {at} path ({:#?}): ", root);
-        let mut ptr_head = root.next;
+        if root.is_null() {
+            let msg = "[ALERT]: Root `DummyObject` was null at index {at}, so nothing to print!";
+            println!("{msg}");
+            return;
+        }
+
         unsafe {
+            print!("Root {at} path ({:#?}): ", *root);
+            let mut ptr_head = (**root).next;
             while !(*ptr_head).next.is_null() {
                 print!("{:#?} -> ", &*ptr_head);
                 ptr_head = (*ptr_head).next;
@@ -137,9 +151,9 @@ fn main() {
     // }
 
     {
-        let d3 = DummyObject::new();
-        let d4 = DummyObject::new();
-        let d5 = DummyObject::new();
+        let d3 = DummyObject::new_on_heap();
+        let d4 = DummyObject::new_on_heap();
+        let d5 = DummyObject::new_on_heap();
 
         let root_idx = 0;
         println!("[Before adding reference at index {root_idx}]");
