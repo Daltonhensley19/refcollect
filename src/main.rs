@@ -53,22 +53,22 @@ impl DummyObject {
 /// This is a memory arena that keeps track of the references to roots of `DummyObject`
 #[derive(Debug, Default)]
 struct MarkandSweepGC {
-    objects: Vec<*mut DummyObject>,
+    roots: Vec<*mut DummyObject>,
 }
 
 impl MarkandSweepGC {
     fn new_spawn_test_dummies(amount: usize) -> Self {
-        let mut objects = Vec::with_capacity(amount);
+        let mut roots = Vec::with_capacity(amount);
         for _ in 0..amount {
             let dummy_obj = DummyObject::new_on_heap();
-            objects.push(dummy_obj);
+            roots.push(dummy_obj);
         }
 
-        Self { objects }
+        Self { roots }
     }
 
     fn refernce_dummy_at_to(&mut self, at: usize, dummy: *mut DummyObject) {
-        let root = self.objects.get_mut(at);
+        let root = self.roots.get_mut(at);
 
         assert!(
             root.is_some(),
@@ -81,7 +81,7 @@ impl MarkandSweepGC {
     }
 
     fn display_root_trail_addresses(&self, at: usize) {
-        let root = self.objects.get(at);
+        let root = self.roots.get(at);
         assert!(
             root.is_some(),
             "No root dummy object was not found at index"
@@ -111,7 +111,7 @@ impl MarkandSweepGC {
     }
 
     fn display_root_trail_values(&self, at: usize) {
-        let root = self.objects.get(at);
+        let root = self.roots.get(at);
         assert!(
             root.is_some(),
             "No root dummy object was not found at index"
@@ -142,7 +142,7 @@ impl MarkandSweepGC {
 }
 
 fn main() {
-    let mut gc_arena = MarkandSweepGC::new_spawn_test_dummies(2);
+    let mut gc_arena = MarkandSweepGC::new_spawn_test_dummies(5);
 
     let ptr = DummyObject::new_on_heap();
 
