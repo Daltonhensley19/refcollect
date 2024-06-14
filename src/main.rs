@@ -48,6 +48,15 @@ impl DummyObject {
             }
         }
     }
+
+    fn free(object: *mut DummyObject) {
+        assert!(
+            !object.is_null(),
+            "Memory deallocation failed due to trying to free a null pointer!"
+        );
+        let layout = std::alloc::Layout::new::<DummyObject>();
+        unsafe { std::alloc::dealloc(object as *mut u8, layout) };
+    }
 }
 
 /// This is a memory arena that keeps track of the references to roots of `DummyObject`
@@ -65,6 +74,36 @@ impl MarkandSweepGC {
         }
 
         Self { roots }
+    }
+
+    fn clear(&mut self) {
+        for root in &mut self.roots {
+            unsafe {
+                let mut ptr_head = *root;
+                while !(*ptr_head).next.is_null() {
+                    // Get Address of next `DummyObject`
+                    let next_addr = (*ptr_head).next;
+
+                    // Deallocate the current `DummyObject`
+                    DummyObject::free(ptr_head);
+
+                    // `ptr_head` now is pointing/chasing the next node
+                    // which was pointed to by the previous node.
+                    ptr_head = next_addr;
+                }
+
+                // Free the current `ptr_head` which is the last node along
+                // a given `root` path.
+                // PERF: Is this branch needed here?
+                if !ptr_head.is_null() {
+                    DummyObject::free(ptr_head);
+                }
+
+                // Set `root` to null, disallowing further pointer chasing
+                // of the current `root`.
+                *root = std::ptr::null_mut();
+            }
+        }
     }
 
     fn refernce_dummy_at_to(&mut self, at: usize, dummy: *mut DummyObject) {
@@ -90,7 +129,8 @@ impl MarkandSweepGC {
         let root = root.unwrap();
 
         if root.is_null() {
-            let msg = "[ALERT]: Root `DummyObject` was null at index {at}, so nothing to print!";
+            let msg =
+                format!("[ALERT]: Root `DummyObject` was null at index {at}, so nothing to print!");
             println!("{msg}");
             return;
         }
@@ -120,13 +160,14 @@ impl MarkandSweepGC {
         let root = root.unwrap();
 
         if root.is_null() {
-            let msg = "[ALERT]: Root `DummyObject` was null at index {at}, so nothing to print!";
+            let msg =
+                format!("[ALERT]: Root `DummyObject` was null at index {at}, so nothing to print!");
             println!("{msg}");
             return;
         }
 
         unsafe {
-            print!("Root {at} path ({:#?}): ", *root);
+            print!("Root {at} path ({:#?}): ", **root);
             let mut ptr_head = (**root).next;
             while !(*ptr_head).next.is_null() {
                 print!("{:#?} -> ", &*ptr_head);
@@ -156,15 +197,18 @@ fn main() {
         let d5 = DummyObject::new_on_heap();
 
         let root_idx = 0;
-        println!("[Before adding reference at index {root_idx}]");
-        println!("{gc_arena:#?}");
+        // println!("[Before adding reference at index {root_idx}]");
+        // println!("{gc_arena:#?}");
         gc_arena.refernce_dummy_at_to(root_idx, d3);
         gc_arena.refernce_dummy_at_to(root_idx, d4);
         gc_arena.refernce_dummy_at_to(root_idx, d5);
-        println!("\n\n\n[After adding reference at index {root_idx}]");
+        // println!("\n\n\n[After adding reference at index {root_idx}]");
         println!("{gc_arena:#?}");
 
-        gc_arena.display_root_trail_addresses(root_idx);
+        // gc_arena.display_root_trail_addresses(root_idx);
     }
+
+    gc_arena.clear();
+
     gc_arena.display_root_trail_values(0);
 }
