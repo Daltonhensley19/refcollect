@@ -21,8 +21,12 @@ impl DummyObject {
 
     fn new_on_heap() -> *mut DummyObject {
         let layout = std::alloc::Layout::new::<DummyObject>();
+
+        // SAFETY: `ptr` must be be assigned a value of `DummyObject`
+        // in order for it to be valid.
         let ptr = unsafe { std::alloc::alloc(layout) };
 
+        // SAFETY: Users of `ptr` must ensure that `ptr` is not null.
         unsafe {
             *(ptr as *mut DummyObject) = DummyObject::new();
         }
@@ -37,24 +41,31 @@ impl DummyObject {
             // Find the end of the list
             let mut ptr = self.next;
 
+            // SAFETY: `ptr.next` is not null here, so we can safely
+            // dereference it inside the while loop.
             unsafe {
                 while !(*ptr).next.is_null() {
                     ptr = (*ptr).next;
                 }
             }
 
+            // SAFETY: `ptr.next` is not null here, so we can safely
+            // dereference it.
             unsafe {
                 (*ptr).next = dummy;
             }
         }
     }
 
-    fn free(object: *mut DummyObject) {
+    fn free(mut object: *mut DummyObject) {
         assert!(
             !object.is_null(),
             "Memory deallocation failed due to trying to free a null pointer!"
         );
         let layout = std::alloc::Layout::new::<DummyObject>();
+
+        // SAFETY: `object` must refer to a chuck of memory that is live
+        // and allocated/aligned to a `layout` of `DummyObject`.
         unsafe { std::alloc::dealloc(object as *mut u8, layout) };
     }
 }
@@ -63,6 +74,15 @@ impl DummyObject {
 #[derive(Debug, Default)]
 struct MarkandSweepGC {
     roots: Vec<*mut DummyObject>,
+}
+
+// RAII for `MarkandSweepGC` which automatically calls `clear()`
+// when it goes out of scope. We do this because we want to make
+// sure that all `*mut DummyObject` are freed from the heap.
+impl Drop for MarkandSweepGC {
+    fn drop(&mut self) {
+        self.clear();
+    }
 }
 
 impl MarkandSweepGC {
@@ -79,7 +99,11 @@ impl MarkandSweepGC {
     fn clear(&mut self) {
         for root in &mut self.roots {
             unsafe {
+                // `ptr_head` is the head of the `root` path
                 let mut ptr_head = *root;
+
+                // Perform a deallocation loop until `ptr_head.next` is null,
+                // which means that we have reached the end of the `root` path.
                 while !(*ptr_head).next.is_null() {
                     // Get Address of next `DummyObject`
                     let next_addr = (*ptr_head).next;
@@ -183,32 +207,43 @@ impl MarkandSweepGC {
 }
 
 fn main() {
-    let mut gc_arena = MarkandSweepGC::new_spawn_test_dummies(5);
+    const DUMMY_AMOUNT: usize = 10;
+    let mut gc_arena = MarkandSweepGC::new_spawn_test_dummies(DUMMY_AMOUNT);
 
     let ptr = DummyObject::new_on_heap();
+
+    let mut ptrs = vec![];
+    for _ in 0..DUMMY_AMOUNT {
+        ptrs.push(DummyObject::new_on_heap());
+    }
 
     // unsafe {
     //     dbg!(&*(ptr));
     // }
 
-    {
-        let d3 = DummyObject::new_on_heap();
-        let d4 = DummyObject::new_on_heap();
-        let d5 = DummyObject::new_on_heap();
-
-        let root_idx = 0;
-        // println!("[Before adding reference at index {root_idx}]");
-        // println!("{gc_arena:#?}");
-        gc_arena.refernce_dummy_at_to(root_idx, d3);
-        gc_arena.refernce_dummy_at_to(root_idx, d4);
-        gc_arena.refernce_dummy_at_to(root_idx, d5);
-        // println!("\n\n\n[After adding reference at index {root_idx}]");
-        println!("{gc_arena:#?}");
-
-        // gc_arena.display_root_trail_addresses(root_idx);
+    for i in 0..DUMMY_AMOUNT {
+        gc_arena.refernce_dummy_at_to(i, ptrs[i]);
     }
 
-    gc_arena.clear();
-
     gc_arena.display_root_trail_values(0);
+
+    //
+    // {
+    //     let d3 = DummyObject::new_on_heap();
+    //     let d4 = DummyObject::new_on_heap();
+    //     let d5 = DummyObject::new_on_heap();
+    //
+    //     let root_idx = 0;
+    //     // println!("[Before adding reference at index {root_idx}]");
+    //     // println!("{gc_arena:#?}");
+    //     gc_arena.refernce_dummy_at_to(root_idx, d3);
+    //     gc_arena.refernce_dummy_at_to(root_idx, d4);
+    //     gc_arena.refernce_dummy_at_to(root_idx, d5);
+    //     // println!("\n\n\n[After adding reference at index {root_idx}]");
+    //     println!("{gc_arena:#?}");
+    //
+    //     // gc_arena.display_root_trail_addresses(root_idx);
+    // }
+
+    // gc_arena.display_root_trail_values(0);
 }
