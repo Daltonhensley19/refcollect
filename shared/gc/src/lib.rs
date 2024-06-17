@@ -86,7 +86,7 @@ impl Drop for MarkandSweepGC {
 }
 
 impl MarkandSweepGC {
-    pub fn new_spawn_test_dummies(amount: usize) -> Self {
+    pub fn new_with_test_dummy_roots(amount: usize) -> Self {
         let mut roots = Vec::with_capacity(amount);
         for _ in 0..amount {
             let dummy_obj = DummyObject::new_on_heap();

@@ -2,7 +2,7 @@ use gc::{DummyObject, MarkandSweepGC};
 
 fn main() {
     const DUMMY_AMOUNT: usize = 2;
-    let mut gc_arena = MarkandSweepGC::new_spawn_test_dummies(DUMMY_AMOUNT);
+    let mut gc_arena = MarkandSweepGC::new_with_test_dummy_roots(DUMMY_AMOUNT);
 
     let ptr = DummyObject::new_on_heap();
 
