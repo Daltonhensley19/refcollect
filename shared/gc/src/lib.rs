@@ -106,6 +106,12 @@ impl MarkandSweepGC {
         self.roots.push(root);
     }
 
+    pub fn add_n_roots(&mut self, amount: usize) {
+        for _ in 0..amount {
+            self.add_root();
+        }
+    }
+
     fn clear(&mut self) {
         for root in &mut self.roots {
             unsafe {
