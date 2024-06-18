@@ -1,3 +1,4 @@
+// #![forbid(missing_docs)]
 use rand::{thread_rng, Rng};
 
 #[derive(Debug, Clone)]
@@ -94,6 +95,15 @@ impl MarkandSweepGC {
         }
 
         Self { roots }
+    }
+
+    pub fn add_root_with(&mut self, root: *mut DummyObject) {
+        self.roots.push(root);
+    }
+
+    pub fn add_root(&mut self) {
+        let root = DummyObject::new_on_heap();
+        self.roots.push(root);
     }
 
     fn clear(&mut self) {
