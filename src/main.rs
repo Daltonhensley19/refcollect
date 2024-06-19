@@ -18,6 +18,21 @@ fn main() {
         gc_arena.refernce_dummy_at_to(0, ptr);
     }
 
-    // gc_arena.mark_unreachable(0, 1);
+    // Test `sweep()` which will do nothing since no roots are marked
+    gc_arena.sweep();
+
+    // Mark root `DummyObject` in the `gc_arena` as unreachable.
+    gc_arena.mark_unreachable(1, 0);
+
+    // Show that the root along the path `root -> ... -> NULL` is not reachable
     gc_arena.display_root_trail_values(0);
+
+    // Run another `sweep()` to clear the path `root -> ... -> NULL` being automatically freed
+    gc_arena.sweep();
+
+    gc_arena.display_root_trail_values(0);
+
+    // NOTE: `gc_arena` uses RAII to automatically clean up all internal roots and their
+    // references to `DummyObject`'s when `gc_arena` goes out of scope. Use `gc_arena.leak()` to
+    // prevent this behavior.
 }
