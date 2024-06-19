@@ -19,19 +19,20 @@ Ensure you have the following prerequisites installed on your system:
 ### Clone the Repository
 
 First, clone the repository:
-
 ```bash
 git clone https://github.com/Daltonhensley19/refcollect.git
 cd refcollect
 ```
-```
 
 ### Install Rust
+```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
-### Build and Run Refcollect
-cargo run 
 
+### Build and Run Refcollect
+```bash
+cargo run 
+```
 
 ## License
 Distributed under the MIT License.
