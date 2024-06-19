@@ -1,6 +1,5 @@
 use std::cell::Cell;
 
-// #![forbid(missing_docs)]
 use rand::{thread_rng, Rng};
 
 #[derive(Debug, Clone)]
