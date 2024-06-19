@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 // #![forbid(missing_docs)]
 use rand::{thread_rng, Rng};
 
@@ -58,7 +60,7 @@ impl DummyObject {
         }
     }
 
-    fn free(mut object: *mut DummyObject) {
+    fn free(object: &*mut DummyObject) {
         assert!(
             !object.is_null(),
             "Memory deallocation failed due to trying to free a null pointer!"
@@ -67,14 +69,16 @@ impl DummyObject {
 
         // SAFETY: `object` must refer to a chuck of memory that is live
         // and allocated/aligned to a `layout` of `DummyObject`.
-        unsafe { std::alloc::dealloc(object as *mut u8, layout) };
+        println!("Currently freeing: {:#?}", &*object);
+        unsafe { std::alloc::dealloc(*object as *mut u8, layout) };
     }
 }
 
 /// This is a memory arena that keeps track of the references to roots of `DummyObject`
 #[derive(Debug, Default)]
 pub struct MarkandSweepGC {
-    roots: Vec<*mut DummyObject>,
+    roots: Vec<Cell<*mut DummyObject>>,
+    leak: bool,
 }
 
 // RAII for `MarkandSweepGC` which automatically calls `clear()`
@@ -82,7 +86,9 @@ pub struct MarkandSweepGC {
 // sure that all `*mut DummyObject` are freed from the heap.
 impl Drop for MarkandSweepGC {
     fn drop(&mut self) {
-        self.clear();
+        if !self.leak {
+            self.clear();
+        }
     }
 }
 
@@ -90,20 +96,70 @@ impl MarkandSweepGC {
     pub fn new_with_test_dummy_roots(amount: usize) -> Self {
         let mut roots = Vec::with_capacity(amount);
         for _ in 0..amount {
-            let dummy_obj = DummyObject::new_on_heap();
+            let dummy_obj = Cell::new(DummyObject::new_on_heap());
             roots.push(dummy_obj);
         }
 
-        Self { roots }
+        Self { roots, leak: false }
+    }
+
+    pub fn leak(&mut self) {
+        self.leak = true;
+    }
+
+    pub fn display_root(&self, root_idx: usize) {
+        let root = self.roots.get(root_idx);
+
+        if root.is_none() {
+            return;
+        }
+
+        let root = root.unwrap();
+
+        unsafe {
+            if (root.get()).is_null() {
+                return;
+            }
+
+            println!("{:#?}", *root.get());
+        }
+    }
+
+    pub fn display_root_address(&self, root_idx: usize) {
+        let root = self.roots.get(root_idx);
+
+        if root.is_none() {
+            return;
+        }
+
+        let root = root.unwrap();
+
+        if (root.get()).is_null() {
+            return;
+        }
+
+        println!("{:#?}", root.get());
+    }
+
+    pub fn display_roots(&self) {
+        for idx in 0..self.roots.len() {
+            self.display_root(idx);
+        }
+    }
+
+    pub fn display_roots_addresses(&self) {
+        for idx in 0..self.roots.len() {
+            self.display_root_address(idx)
+        }
     }
 
     pub fn add_root_with(&mut self, root: *mut DummyObject) {
-        self.roots.push(root);
+        self.roots.push(Cell::new(root));
     }
 
     pub fn add_root(&mut self) {
         let root = DummyObject::new_on_heap();
-        self.roots.push(root);
+        self.roots.push(Cell::new(root));
     }
 
     pub fn add_n_roots(&mut self, amount: usize) {
@@ -116,7 +172,14 @@ impl MarkandSweepGC {
         for root in &mut self.roots {
             unsafe {
                 // `ptr_head` is the head of the `root` path
-                let mut ptr_head = *root;
+                let mut ptr_head = root.get();
+
+                // If the current `root` is null, then we have
+                // have no need to deallocate anything since it was likely
+                // deallocated already.
+                if ptr_head.is_null() {
+                    continue;
+                }
 
                 // Perform a deallocation loop until `ptr_head.next` is null,
                 // which means that we have reached the end of the `root` path.
@@ -125,7 +188,7 @@ impl MarkandSweepGC {
                     let next_addr = (*ptr_head).next;
 
                     // Deallocate the current `DummyObject`
-                    DummyObject::free(ptr_head);
+                    DummyObject::free(&ptr_head);
 
                     // `ptr_head` now is pointing/chasing the next node
                     // which was pointed to by the previous node.
@@ -136,12 +199,12 @@ impl MarkandSweepGC {
                 // a given `root` path.
                 // PERF: Is this branch needed here?
                 if !ptr_head.is_null() {
-                    DummyObject::free(ptr_head);
+                    DummyObject::free(&ptr_head);
                 }
 
                 // Set `root` to null, disallowing further pointer chasing
                 // of the current `root`.
-                *root = std::ptr::null_mut();
+                root.set(std::ptr::null_mut());
             }
         }
     }
@@ -155,7 +218,7 @@ impl MarkandSweepGC {
         );
 
         unsafe {
-            (**root.unwrap()).reference_to(dummy);
+            (*root.unwrap().get()).reference_to(dummy);
         }
     }
 
@@ -168,7 +231,7 @@ impl MarkandSweepGC {
 
         let root = root.unwrap();
 
-        if root.is_null() {
+        if root.get().is_null() {
             let msg =
                 format!("[ALERT]: Root `DummyObject` was null at index {at}, so nothing to print!");
             println!("{msg}");
@@ -176,8 +239,8 @@ impl MarkandSweepGC {
         }
 
         unsafe {
-            print!("Root {at} path ({:#p}): ", *root);
-            let mut ptr_head = (**root).next;
+            print!("Root {at} path ({:#p}): ", root.get());
+            let mut ptr_head = (*root.get()).next;
             while !(*ptr_head).next.is_null() {
                 print!("{:#p} -> ", ptr_head);
                 ptr_head = (*ptr_head).next;
@@ -197,8 +260,9 @@ impl MarkandSweepGC {
             "No root dummy object was not found at index"
         );
 
-        let root = root.unwrap();
+        let root = root.unwrap().get();
 
+        // dbg!((*root).is_null());
         if root.is_null() {
             let msg =
                 format!("[ALERT]: Root `DummyObject` was null at index {at}, so nothing to print!");
@@ -207,13 +271,17 @@ impl MarkandSweepGC {
         }
 
         unsafe {
-            print!("Root {at} path ({:#?}): ", **root);
-            let mut ptr_head = (**root).next;
-            while !(*ptr_head).next.is_null() {
+            // assert!((*root).is_null());
+            print!("Root {at} path ({:#?}): ", *root);
+            let mut ptr_head = (*root).next;
+            while !ptr_head.is_null() && !(*ptr_head).next.is_null() {
                 print!("{:#?} -> ", &*ptr_head);
                 ptr_head = (*ptr_head).next;
             }
-
+            if ptr_head.is_null() {
+                println!(" -> NULL");
+                assert!(false);
+            }
             if (*ptr_head).next.is_null() {
                 print!("{:#?} -> ", &*ptr_head);
                 println!("NULL");
@@ -221,14 +289,14 @@ impl MarkandSweepGC {
         }
     }
 
-    fn mark_unreachable(&mut self, root_idx: usize, mut root_depth: usize) {
+    pub fn mark_unreachable(&mut self, root_idx: usize, mut root_depth: usize) {
         let root = self.roots.get(root_idx);
         assert!(
             root.is_some(),
             "No root dummy object was not found at index"
         );
 
-        let root = root.unwrap();
+        let root = root.unwrap().get();
 
         if root.is_null() {
             let msg = format!(
@@ -238,8 +306,10 @@ impl MarkandSweepGC {
             return;
         }
 
+        let mut current_depth = 0usize;
+        let target_depth = root_depth;
         unsafe {
-            let mut ptr_head = *root;
+            let mut ptr_head = root;
             while root_depth != 0 {
                 if (*ptr_head).next.is_null() {
                     break;
@@ -247,24 +317,110 @@ impl MarkandSweepGC {
 
                 ptr_head = (*ptr_head).next;
                 root_depth = root_depth.saturating_sub(1);
+                current_depth = current_depth.saturating_add(1);
             }
 
             // Mark current `ptr_head` as marked, meaning that it
             // is no longer reachable.
             (*ptr_head).marked = true;
         }
+
+        if current_depth != target_depth {
+            assert!(false, "No dummy object to mark was found on path to root");
+        }
     }
 
-    fn sweep(&mut self) {
-        for root in &mut self.roots {
-            let mut ptr_head = *root;
+    pub fn sweep(&mut self) {
+        println!("[INFO] Sweeping garbage...");
+        for (idx, root) in self.roots.iter().enumerate() {
+            let ptr_head = root.get();
 
             if ptr_head.is_null() {
                 continue;
             }
 
-            unsafe { while !(*ptr_head).next.is_null() {} }
+            // Move `ptr_head` into a `Cell`, as it allows us to mutate/free
+            // marked `DummyObject`s via interior mutability.
+            let mut ptr_head = ptr_head;
+
+            unsafe {
+                // If the `root` itself is marked, then we start
+                // the sweep beginning at the `root`.
+                let mut last_unmarked_addr = root.get();
+                if (*ptr_head).marked {
+                    self.sweep_path_starting_at(ptr_head);
+
+                    self.roots[idx].set(std::ptr::null_mut());
+
+                    continue;
+                }
+
+                while !(*ptr_head).next.is_null() {
+                    // If the next address is marked, save the current
+                    // address as we will have to "disconnect" it from
+                    // the rest of the path.
+                    if (*(*ptr_head).next).marked {
+                        last_unmarked_addr = ptr_head;
+                    }
+
+                    ptr_head = (*ptr_head).next;
+
+                    if (*ptr_head).marked {
+                        self.sweep_path_starting_at(ptr_head);
+
+                        // Disconnect the last accessable DummyObject from the sweeped
+                        // part of the ahead of it.
+                        (*last_unmarked_addr).next = std::ptr::null_mut();
+                    }
+                }
+            }
         }
+
+        println!("[INFO] Sweeping garbage...DONE\n\n");
+    }
+
+    // Allows the caller to simulate the marking of a `DummyObject`
+    //
+    // Parameters:
+    // root_idx: Index of the root `DummyObject`
+    // self: &mut MarkandSweepGC
+    fn mark_root(&mut self, root_idx: usize) {
+        let root = self.roots.get(root_idx);
+
+        if root.is_none() {
+            return;
+        }
+
+        let root = root.unwrap().get();
+
+        unsafe {
+            if root.is_null() {
+                return;
+            }
+
+            println!("[INFO] Marking root {root:#?}...");
+            (*root).marked = true;
+            println!("[INFO] Marking root {root:#?}...DONE\n\n");
+        }
+    }
+
+    unsafe fn sweep_path_starting_at(&self, mut ptr_head: *mut DummyObject) {
+        // While we are not at the end of the `ptr_head` path
+        let mut next_addr;
+        while !(*ptr_head).next.is_null() {
+            // Get next address since it is destroyed when we
+            // free the current `ptr_head`.
+            next_addr = (*ptr_head).next;
+
+            DummyObject::free(&ptr_head);
+
+            // Move `ptr_head` to point to next `DummyObject`
+            ptr_head = next_addr;
+        }
+
+        // Free the remaining `ptr_head` at the end of the `root` path.
+        // TODO: Make sure this does not segfault
+        DummyObject::free(&ptr_head);
     }
 }
 
